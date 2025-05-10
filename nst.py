@@ -69,7 +69,7 @@ def main():
     parser.add_argument('--beta', type=float, default=10000)
     parser.add_argument('--lr', type=float, default=0.004)
     parser.add_argument('--epochs', type=int, default=10000)
-    parser.add_argument('--save-every', type=int, default=100)
+    parser.add_argument('--save-every', type=int, default=500)
     parser.add_argument('--init', choices=['content', 'style', 'noise'], default='content',
                         help='Initialization method: content, style, or noise')
     args = parser.parse_args()
@@ -92,21 +92,26 @@ def main():
         style_features = model(style_img)
         content_features = model(content_img)
 
-    optimizer = optim.Adam([generated_image], lr=args.lr)
+    optimizer = torch.optim.LBFGS([generated_image])
 
-    for e in range(args.epochs):
-        gen_features = model(generated_image)
-        total_loss = calculate_loss(gen_features, content_features, style_features, args.alpha, args.beta)
+    run = [0]  # mutable counter for closure
+    max_iter = args.epochs
 
-        optimizer.zero_grad()
-        total_loss.backward()
-        optimizer.step()
+    while run[0] <= max_iter:
+        def closure():
+            optimizer.zero_grad()
+            gen_features = model(generated_image)
+            total_loss = calculate_loss(gen_features, content_features, style_features, args.alpha, args.beta)
+            total_loss.backward()
+            if run[0] % args.save_every == 0:
+                print(f"Epoch {run[0]}: Loss = {total_loss.item()}")
+                with torch.no_grad():
+                    img = inv_normalize(generated_image.squeeze(0).cpu()).clamp(0, 1)
+                    save_image(img, f"{args.output_dir}/gen_{run[0]}.png")
+            run[0] += 1
+            return total_loss
 
-        if e % args.save_every == 0:
-            print(f"Epoch {e}: Loss = {total_loss.item()}")
-            with torch.no_grad():
-                img = inv_normalize(generated_image.squeeze(0).cpu()).clamp(0, 1)
-                save_image(img, f"{args.output_dir}/gen_{e}.png")
+        optimizer.step(closure)
 
     with torch.no_grad():
         final_img = inv_normalize(generated_image.squeeze(0).cpu()).clamp(0, 1)
